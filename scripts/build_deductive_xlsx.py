@@ -14,6 +14,11 @@ from openpyxl.utils import get_column_letter
 exp = json.load(open(sys.argv[1], encoding="utf-8"))
 secs = json.load(open(sys.argv[2], encoding="utf-8"))
 out = sys.argv[3]
+import pickle
+IDX = pickle.load(open(sys.argv[4], "rb")) if len(sys.argv) > 4 else {}
+def homograph(w):
+    """같은 철자의 다른 표제어(동음이의어) 수. 2 이상이면 빈도·사업계획서 등장이 다른 뜻일 수 있음"""
+    return len({s["word"] for s in IDX.get(w, []) if s["typ"] == "일반어"})
 
 def zipf(w):
     c = [w]
@@ -61,6 +66,7 @@ lines = [
  ("열 설명", True),
  ("현대 사용 빈도(zipf): wordfreq 한국어 빈도(위키백과·자막·웹 기반). 3 이상이면 흔히 쓰는 말, 0이면 현대 텍스트에서 거의 안 쓰는 옛말·희귀 한자어. 동음이의어 빈도가 섞일 수 있음(예: 시구).", False),
  (f"사업계획서 등장 문서 수: DIPS 사업계획서 {NDOC}건 중 그 단어(형태소 원형)가 한 번이라도 나온 문서 수. 0이면 점수 계산에 영향이 없음.", False),
+ ("동음이의어 'N개 주의': 같은 철자의 표제어가 N개. 예) 두려움을 뜻하는 옛말 '도구'와 연장 '도구'. 이 경우 현대 빈도·사업계획서 등장은 다른 뜻의 것일 가능성이 크므로, 뜻풀이를 보고 판정하고 사전에 넣을 때는 문맥 규칙이 필요.", False),
  ("평정자1~3: Logos/Pathos/Ethos/제외. 판정은 세 명이 같은 차원일 때만 그 차원.", False), ("", False),
  ("권장: 현대 빈도 2.5 이상이거나 사업계획서에 1건 이상 나온 단어부터 평정(필터로 거르기). 나머지는 원 논문처럼 전체를 평정할지, 기준을 정해 제외할지 결정 후 방법론에 기록.", False),
  ("다음 단계: 우리말샘(관련어·비슷한말이 더 풍부) 확장 결과를 같은 형식으로 추가 → 귀납 후보와 합쳐 평정.", False),
@@ -72,7 +78,7 @@ ws.column_dimensions["A"].width = 130
 
 ws = wb.create_sheet("연역후보")
 cols = [("No", 6), ("차원", 9), ("테마", 17), ("단어", 14), ("경로", 11), ("단계", 6), ("경유", 10), ("뜻풀이", 55),
-        ("현대 빈도(zipf)", 10), ("사업계획서 등장 문서 수", 11), ("평정자1", 10), ("평정자2", 10), ("평정자3", 10), ("판정", 10), ("비고", 16)]
+        ("현대 빈도(zipf)", 10), ("사업계획서 등장 문서 수", 11), ("동음이의어", 9), ("평정자1", 10), ("평정자2", 10), ("평정자3", 10), ("판정", 10), ("비고", 16)]
 for j, (h, w) in enumerate(cols, 1):
     c = ws.cell(row=1, column=j, value=h); c.font = hf; c.fill = hfill; c.border = B
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -85,17 +91,20 @@ for r in rows:
 rows.sort(key=lambda r: (order[r["dim"]], r["theme"], porder[r["path"]], -r["df"], -r["z"]))
 inp = PatternFill("solid", fgColor="FFFF00"); grey = Font(name=A, size=10, color="808080")
 for i, r in enumerate(rows, 2):
-    vals = [i - 1, r["dim"], r["theme"], r["word"], r["path"], r["level"], r["via"], r["defn"], r["z"], r["df"]]
+    hg = homograph(r["word"])
+    vals = [i - 1, r["dim"], r["theme"], r["word"], r["path"], r["level"], r["via"], r["defn"], r["z"], r["df"], f"{hg}개 주의" if hg > 1 else ""]
     rare = r["z"] < 2.5 and r["df"] == 0
     for j, v in enumerate(vals, 1):
         c = ws.cell(row=i, column=j, value=v); c.font = grey if rare and j in (4, 8) else base; c.border = B
         c.alignment = Alignment(vertical="top", wrap_text=(j == 8))
     ws.cell(row=i, column=2).fill = PatternFill("solid", fgColor=dimfill[r["dim"]])
-    for j in (11, 12, 13):
+    if hg > 1:
+        ws.cell(row=i, column=11).fill = PatternFill("solid", fgColor="F8CBAD")
+    for j in (12, 13, 14):
         c = ws.cell(row=i, column=j); c.fill = inp; c.border = B; c.font = base
-    f = ws.cell(row=i, column=14, value=f'=IF(COUNTA(K{i}:M{i})<3,"",IF(AND(K{i}=L{i},L{i}=M{i}),K{i},"불일치"))'); f.font = base; f.border = B
-    ws.cell(row=i, column=15).border = B
-dv.add(f"K2:M{len(rows)+1}"); ws.freeze_panes = "E2"; ws.auto_filter.ref = f"A1:O{len(rows)+1}"
+    f = ws.cell(row=i, column=15, value=f'=IF(COUNTA(L{i}:N{i})<3,"",IF(AND(L{i}=M{i},M{i}=N{i}),L{i},"불일치"))'); f.font = base; f.border = B
+    ws.cell(row=i, column=16).border = B
+dv.add(f"L2:N{len(rows)+1}"); ws.freeze_panes = "E2"; ws.auto_filter.ref = f"A1:P{len(rows)+1}"
 
 ws = wb.create_sheet("씨앗")
 cols = [("차원", 9), ("테마", 18), ("씨앗", 12), ("선택한 뜻 수", 9), ("선택한 뜻풀이", 90)]
